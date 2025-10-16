@@ -1,4 +1,4 @@
-const SYNC_INTERVAL = 10 * 1000 // 10 sekund
+const SYNC_INTERVAL = 60 * 1000 // 60 sekund
 
 let syncIntervalId: number | null = null
 
@@ -40,7 +40,7 @@ export function startAutoSync() {
     }
   })
 
-  // Opakovaná synchronizace každých 10 sekund
+  // Opakovaná synchronizace každých 60 sekund
   syncIntervalId = window.setInterval(() => {
     syncOrders().then(result => {
       if (result.success) {
@@ -51,7 +51,7 @@ export function startAutoSync() {
     })
   }, SYNC_INTERVAL)
 
-  console.log('Auto-sync started (every 10 seconds)')
+  console.log('Auto-sync started (every 60 seconds)')
 }
 
 export function stopAutoSync() {
