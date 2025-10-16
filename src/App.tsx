@@ -1,12 +1,21 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import Kitchen from './pages/Kitchen'
 import Bar from './pages/Bar'
 import AdminExcluded from './pages/AdminExcluded'
 import AdminWarnings from './pages/AdminWarnings'
 import Statistics from './pages/Statistics'
+import { startAutoSync, stopAutoSync } from './services/syncService'
 
 function App() {
+  useEffect(() => {
+    startAutoSync()
+    return () => {
+      stopAutoSync()
+    }
+  }, [])
+
   return (
     <BrowserRouter>
       <Routes>
