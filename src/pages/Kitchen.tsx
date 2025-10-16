@@ -218,7 +218,9 @@ export default function Kitchen() {
         {Object.values(activeOrders).length === 0 ? (
           <p style={styles.emptyMessage}>Žádné aktivní objednávky</p>
         ) : (
-          Object.values(activeOrders).map(order => renderOrder(order, false))
+          Object.values(activeOrders)
+            .sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime())
+            .map(order => renderOrder(order, false))
         )}
       </div>
 
@@ -229,7 +231,9 @@ export default function Kitchen() {
         {Object.values(completedOrders).length === 0 ? (
           <p style={styles.emptyMessage}>Žádné dokončené objednávky</p>
         ) : (
-          Object.values(completedOrders).map(order => renderOrder(order, true))
+          Object.values(completedOrders)
+            .sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime())
+            .map(order => renderOrder(order, true))
         )}
       </div>
     </div>

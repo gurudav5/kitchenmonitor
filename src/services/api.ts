@@ -163,3 +163,37 @@ export async function autoRemoveExcludedFromKitchen(): Promise<void> {
 
   if (error) throw error
 }
+
+export async function getAllProducts(): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('name')
+
+  if (error) throw error
+  return data || []
+}
+
+export async function syncProducts(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_SUPABASE_ANON_KEY
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/sync-products`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Error syncing products:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
