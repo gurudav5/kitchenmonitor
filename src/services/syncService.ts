@@ -5,7 +5,7 @@ let syncIntervalId: number | null = null
 export async function syncOrders(): Promise<{ success: boolean; error?: string }> {
   try {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_SUPABASE_ANON_KEY
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
     const response = await fetch(`${supabaseUrl}/functions/v1/sync-orders`, {
       method: 'POST',
