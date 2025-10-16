@@ -16,10 +16,18 @@ export default function Statistics() {
 
   useEffect(() => {
     loadStats()
+
+    const interval = setInterval(() => {
+      loadStats()
+    }, 30000)
+
+    return () => clearInterval(interval)
   }, [])
 
   const loadStats = async () => {
     try {
+      await supabase.rpc('calculate_daily_stats')
+
       const today = new Date().toISOString().split('T')[0]
 
       const { data: dailyStats, error } = await supabase
@@ -30,7 +38,7 @@ export default function Statistics() {
 
       if (error) throw error
 
-      const { data: warningCount } = await supabase
+      const { count: warningCount } = await supabase
         .from('order_timing')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'warning')
