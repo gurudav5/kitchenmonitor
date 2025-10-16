@@ -9,10 +9,7 @@ const corsHeaders = {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
@@ -23,7 +20,6 @@ Deno.serve(async (req: Request) => {
     const cloudId = '343951305';
     const refreshToken = 'd4af932a9d1260132c7b3401f8232d7c';
 
-    console.log('Getting access token...');
     const tokenResponse = await fetch('https://api.dotykacka.cz/v2/signin/token', {
       method: 'POST',
       headers: {
@@ -35,10 +31,8 @@ Deno.serve(async (req: Request) => {
     });
 
     if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      console.error('Token response error:', tokenResponse.status, errorText);
       return new Response(
-        JSON.stringify({ success: false, error: `Failed to get access token: ${tokenResponse.status}` }),
+        JSON.stringify({ success: false, error: 'Failed to authenticate' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -48,45 +42,64 @@ Deno.serve(async (req: Request) => {
 
     if (!accessToken) {
       return new Response(
-        JSON.stringify({ success: false, error: 'No access token received' }),
+        JSON.stringify({ success: false, error: 'No access token' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const tomorrow3am = new Date();
+    tomorrow3am.setDate(tomorrow3am.getDate() + 1);
+    tomorrow3am.setHours(3, 0, 0, 0);
 
     const filter = encodeURIComponent(
-      `created|gteq|${sevenDaysAgo.toISOString()};created|lt|${tomorrow.toISOString()}`
+      `created|gteq|${todayMidnight.toISOString()};created|lt|${tomorrow3am.toISOString()}`
     );
 
-    let page = 1;
-    const allOrders: any[] = [];
+    const ordersUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?filter=${filter}&page=1&perPage=100`;
+    const ordersResponse = await fetch(ordersUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json; charset=UTF-8',
+      },
+    });
 
-    while (page <= 10) {
-      const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?filter=${filter}&page=${page}&perPage=100`;
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/json; charset=UTF-8',
-        },
-      });
-
-      if (!response.ok) break;
-      const json = await response.json();
-      if (!json.data || json.data.length === 0) break;
-      allOrders.push(...json.data);
-      if (!json.nextPage) break;
-      page = json.nextPage;
+    if (!ordersResponse.ok) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Failed to fetch orders' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
+
+    const ordersJson = await ordersResponse.json();
+    const orders = ordersJson.data || [];
 
     let processedOrders = 0;
     let processedItems = 0;
 
-    for (const order of allOrders) {
-      const tableName = order._tableId ? await getTableName(cloudId, accessToken, order._tableId) : '';
+    for (const order of orders) {
+      let tableName = '';
+      if (order._tableId) {
+        try {
+          const tableResponse = await fetch(
+            `https://api.dotykacka.cz/v2/clouds/${cloudId}/tables/${order._tableId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                Accept: 'application/json; charset=UTF-8',
+              },
+            }
+          );
+          if (tableResponse.ok) {
+            const tableData = await tableResponse.json();
+            tableName = tableData.name || '';
+          }
+        } catch (e) {
+          console.log('Failed to fetch table:', e);
+        }
+      }
+
       const rawNote = order.note || '';
       const lowerNote = rawNote.toLowerCase();
       let deliveryService = '';
@@ -107,11 +120,9 @@ Deno.serve(async (req: Request) => {
       processedOrders++;
 
       const itemsFilter = encodeURIComponent(`_orderId|eq|${order.id}`);
-      let itemsPage = 1;
-      const orderItems: any[] = [];
-
-      while (itemsPage <= 10) {
-        const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${itemsFilter}&page=${itemsPage}&perPage=100`;
+      const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${itemsFilter}&page=1&perPage=100`;
+      
+      try {
         const itemsResponse = await fetch(itemsUrl, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -119,82 +130,57 @@ Deno.serve(async (req: Request) => {
           },
         });
 
-        if (!itemsResponse.ok) break;
-        const itemsJson = await itemsResponse.json();
-        if (!itemsJson.data || itemsJson.data.length === 0) break;
-        orderItems.push(...itemsJson.data);
-        if (!itemsJson.nextPage) break;
-        itemsPage = itemsJson.nextPage;
-      }
+        if (itemsResponse.ok) {
+          const itemsJson = await itemsResponse.json();
+          const items = itemsJson.data || [];
 
-      for (const item of orderItems) {
-        await supabase.from('order_items').upsert({
-          id: item.id,
-          order_id: order.id,
-          product_id: item._productId || null,
-          name: item.name,
-          quantity: item.quantity,
-          kitchen_status: item.kitchenStatus || 'new',
-          note: item.note || '',
-          shown: false,
-          last_updated: new Date().toISOString(),
-        }, { onConflict: 'id' });
+          for (const item of items) {
+            await supabase.from('order_items').upsert({
+              id: item.id,
+              order_id: order.id,
+              product_id: item._productId || null,
+              name: item.name,
+              quantity: item.quantity,
+              kitchen_status: item.kitchenStatus || 'new',
+              note: item.note || '',
+              shown: false,
+              last_updated: new Date().toISOString(),
+            }, { onConflict: 'id' });
 
-        processedItems++;
+            processedItems++;
 
-        if (item.orderItemCustomizations?.length > 0) {
-          await supabase.from('order_item_subitems').delete().eq('order_item_id', item.id);
-          const subitems = item.orderItemCustomizations.map((c: any) => ({
-            order_item_id: item.id,
-            name: c.name,
-            quantity: c.quantity,
-          }));
-          await supabase.from('order_item_subitems').insert(subitems);
+            if (item.orderItemCustomizations?.length > 0) {
+              await supabase.from('order_item_subitems').delete().eq('order_item_id', item.id);
+              const subitems = item.orderItemCustomizations.map((c: any) => ({
+                order_item_id: item.id,
+                name: c.name,
+                quantity: c.quantity,
+              }));
+              if (subitems.length > 0) {
+                await supabase.from('order_item_subitems').insert(subitems);
+              }
+            }
+          }
         }
+      } catch (e) {
+        console.log('Failed to fetch items for order:', order.id, e);
       }
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Orders synchronized successfully',
+        message: 'Synchronized successfully',
         ordersProcessed: processedOrders,
         itemsProcessed: processedItems,
       }),
-      {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error: any) {
     console.error('Error:', error);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
-      }
+      JSON.stringify({ success: false, error: error.message || 'Unknown error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
-
-async function getTableName(cloudId: string, accessToken: string, tableId: string): Promise<string> {
-  try {
-    const response = await fetch(`https://api.dotykacka.cz/v2/clouds/${cloudId}/tables/${tableId}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json; charset=UTF-8',
-      },
-    });
-    if (!response.ok) return '';
-    const data = await response.json();
-    return data.name || '';
-  } catch {
-    return '';
-  }
-}
