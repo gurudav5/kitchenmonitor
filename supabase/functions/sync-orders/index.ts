@@ -149,17 +149,38 @@ Deno.serve(async (req: Request) => {
 
         if (itemsResponse.ok) {
           const itemsJson = await itemsResponse.json();
-          const items = itemsJson.data || [];          const itemsToInsert = items.map((item: any) => ({
-            id: item.id,
-            order_id: item._orderId,
-            product_id: item._productId || null,
-            name: item.name,
-            quantity: item.quantity,
-            kitchen_status: item.kitchenStatus || 'new',
-            note: item.note || '',
-            shown: false,
-            last_updated: new Date().toISOString(),
-          }));
+          const items = itemsJson.data || [];
+
+          const itemIds = items.map((item: any) => item.id);
+          const { data: existingItems } = await supabase
+            .from('order_items')
+            .select('id, kitchen_status')
+            .in('id', itemIds);
+
+          const existingStatusMap = new Map();
+          if (existingItems) {
+            existingItems.forEach((item: any) => {
+              if (item.kitchen_status === 'completed' || item.kitchen_status === 'passed') {
+                existingStatusMap.set(item.id, item.kitchen_status);
+              }
+            });
+          }
+
+          const itemsToInsert = items.map((item: any) => {
+            const preservedStatus = existingStatusMap.get(item.id);
+
+            return {
+              id: item.id,
+              order_id: item._orderId,
+              product_id: item._productId || null,
+              name: item.name,
+              quantity: item.quantity,
+              kitchen_status: preservedStatus || item.kitchenStatus || 'new',
+              note: item.note || '',
+              shown: false,
+              last_updated: new Date().toISOString(),
+            };
+          });
 
           if (itemsToInsert.length > 0) {
             await supabase.from('order_items').upsert(itemsToInsert, { onConflict: 'id' });
