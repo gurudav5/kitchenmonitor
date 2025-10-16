@@ -22,8 +22,27 @@ export default function Kitchen() {
         getActiveOrders(),
         getCompletedOrders()
       ])
-      setActiveOrders(active)
-      setCompletedOrders(completed)
+
+      setActiveOrders(prev => {
+        const merged = { ...active }
+        for (const orderId of pendingUpdatesRef.current) {
+          if (prev[orderId]) {
+            merged[orderId] = prev[orderId]
+          }
+        }
+        return merged
+      })
+
+      setCompletedOrders(prev => {
+        const merged = { ...completed }
+        for (const orderId of pendingUpdatesRef.current) {
+          if (prev[orderId]) {
+            merged[orderId] = prev[orderId]
+          }
+        }
+        return merged
+      })
+
       setIsLoading(false)
     } catch (error) {
       console.error('Error loading orders:', error)
@@ -66,12 +85,11 @@ export default function Kitchen() {
         updateItemStatus(itemIds, 'in-progress'),
         startOrderPreparation(orderId)
       ])
-      pendingUpdatesRef.current.delete(orderId)
-      await loadOrders()
     } catch (error) {
       console.error('Error preparing order:', error)
-      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
+    } finally {
+      pendingUpdatesRef.current.delete(orderId)
     }
   }
 
@@ -96,7 +114,6 @@ export default function Kitchen() {
       setTimeout(async () => {
         await passOrder(orderId)
         pendingUpdatesRef.current.delete(orderId)
-        await loadOrders()
       }, 5000)
     } catch (error) {
       console.error('Error completing order:', error)
@@ -125,12 +142,11 @@ export default function Kitchen() {
     const itemIds = order.items.map(item => item.id)
     try {
       await updateItemStatus(itemIds, 'in-progress')
-      pendingUpdatesRef.current.delete(orderId)
-      await loadOrders()
     } catch (error) {
       console.error('Error returning order:', error)
-      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
+    } finally {
+      pendingUpdatesRef.current.delete(orderId)
     }
   }
 
