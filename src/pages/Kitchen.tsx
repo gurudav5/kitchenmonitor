@@ -122,7 +122,7 @@ export default function Kitchen() {
         updateItemStatus(itemIds, 'in-progress'),
         startOrderPreparation(orderId)
       ])
-      await loadOrders()
+      setTimeout(() => loadOrders(), 100)
     } catch (error) {
       console.error('Error preparing order:', error)
     }

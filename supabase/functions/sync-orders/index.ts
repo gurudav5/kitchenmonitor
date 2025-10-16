@@ -163,7 +163,7 @@ Deno.serve(async (req: Request) => {
           const existingStatusMap = new Map();
           if (existingItems) {
             existingItems.forEach((item: any) => {
-              if (item.kitchen_status === 'completed' || item.kitchen_status === 'passed') {
+              if (item.kitchen_status !== 'new') {
                 existingStatusMap.set(item.id, item.kitchen_status);
               }
             });
