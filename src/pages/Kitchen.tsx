@@ -8,7 +8,7 @@ export default function Kitchen() {
   const [activeOrders, setActiveOrders] = useState<Record<string, OrderWithItems>>({})
   const [completedOrders, setCompletedOrders] = useState<Record<string, OrderWithItems>>({})
   const [isLoading, setIsLoading] = useState(true)
-  const [countdown, setCountdown] = useState(10)
+  const [countdown, setCountdown] = useState(60)
   const [previousOrderIds, setPreviousOrderIds] = useState<Set<string>>(new Set())
 
   const playNotificationSound = () => {
@@ -46,6 +46,23 @@ export default function Kitchen() {
     }, 200)
   }
 
+  const syncWithAPI = async () => {
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_SUPABASE_ANON_KEY
+
+      await fetch(`${supabaseUrl}/functions/v1/sync-orders`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+    } catch (error) {
+      console.error('Error syncing with API:', error)
+    }
+  }
+
   const loadOrders = async () => {
     try {
       await autoRemoveExcludedFromKitchen()
@@ -73,19 +90,24 @@ export default function Kitchen() {
   }
 
   useEffect(() => {
-    loadOrders()
+    const syncAndLoad = async () => {
+      await syncWithAPI()
+      await loadOrders()
+    }
 
-    const interval = setInterval(() => {
-      loadOrders()
-      setCountdown(10)
-    }, 10000)
+    syncAndLoad()
+
+    const syncInterval = setInterval(() => {
+      syncAndLoad()
+      setCountdown(60)
+    }, 60000)
 
     const countdownInterval = setInterval(() => {
-      setCountdown(prev => prev > 0 ? prev - 1 : 10)
+      setCountdown(prev => prev > 0 ? prev - 1 : 60)
     }, 1000)
 
     return () => {
-      clearInterval(interval)
+      clearInterval(syncInterval)
       clearInterval(countdownInterval)
     }
   }, [])
@@ -303,7 +325,7 @@ export default function Kitchen() {
           ...styles.statusIndicator,
           background: '#10b981'
         }} />
-        <span>Aktualizace za {countdown}s</span>
+        <span>Synchronizace za {countdown}s</span>
       </div>
 
       <TopMenu items={menuItems} />
