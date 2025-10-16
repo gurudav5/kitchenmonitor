@@ -57,8 +57,9 @@ Deno.serve(async (req: Request) => {
       `created|gteq|${todayMidnight.toISOString()};created|lt|${tomorrow3am.toISOString()}`
     );
 
-    const ordersUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?filter=${filter}&page=1&perPage=100`;
-    const ordersResponse = await fetch(ordersUrl, {
+    let ordersUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?page=1&perPage=50&sort=-created`;
+    let ordersResponse = await fetch(ordersUrl, {
+      signal: AbortSignal.timeout(45000),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json; charset=UTF-8',
@@ -67,7 +68,7 @@ Deno.serve(async (req: Request) => {
 
     if (!ordersResponse.ok) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch orders' }),
+        JSON.stringify({ success: false, error: `Failed to fetch orders: ${ordersResponse.status}` }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -78,12 +79,14 @@ Deno.serve(async (req: Request) => {
     let processedOrders = 0;
     let processedItems = 0;
 
-    for (const order of orders) {
-      let tableName = '';
-      if (order._tableId) {
+    const tableIds = [...new Set(orders.map((o: any) => o._tableId).filter(Boolean))];
+    const tablesMap = new Map();
+
+    if (tableIds.length > 0) {
+      const tablePromises = tableIds.map(async (tableId) => {
         try {
           const tableResponse = await fetch(
-            `https://api.dotykacka.cz/v2/clouds/${cloudId}/tables/${order._tableId}`,
+            `https://api.dotykacka.cz/v2/clouds/${cloudId}/tables/${tableId}`,
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -93,13 +96,21 @@ Deno.serve(async (req: Request) => {
           );
           if (tableResponse.ok) {
             const tableData = await tableResponse.json();
-            tableName = tableData.name || '';
+            return { id: tableId, name: tableData.name || '' };
           }
         } catch (e) {
-          console.log('Failed to fetch table:', e);
+          console.log('Failed to fetch table:', tableId, e);
         }
-      }
+        return null;
+      });
 
+      const tablesResults = await Promise.all(tablePromises);
+      tablesResults.filter(Boolean).forEach((table: any) => {
+        tablesMap.set(table.id, table.name);
+      });
+    }
+
+    const ordersToInsert = orders.map((order: any) => {
       const rawNote = order.note || '';
       const lowerNote = rawNote.toLowerCase();
       let deliveryService = '';
@@ -107,21 +118,27 @@ Deno.serve(async (req: Request) => {
       else if (lowerNote.includes('wolt')) deliveryService = 'wolt';
       else if (lowerNote.includes('bolt')) deliveryService = 'bolt';
 
-      await supabase.from('orders').upsert({
+      return {
         id: order.id,
         created: order.created,
         note: order.note || '',
-        table_name: tableName,
+        table_name: tablesMap.get(order._tableId) || '',
         delivery_service: deliveryService,
         delivery_note: rawNote,
         last_updated: new Date().toISOString(),
-      }, { onConflict: 'id' });
+      };
+    });
 
-      processedOrders++;
+    if (ordersToInsert.length > 0) {
+      await supabase.from('orders').upsert(ordersToInsert, { onConflict: 'id' });
+      processedOrders = ordersToInsert.length;
+    }
 
-      const itemsFilter = encodeURIComponent(`_orderId|eq|${order.id}`);
-      const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${itemsFilter}&page=1&perPage=100`;
-      
+    const orderIds = orders.map((o: any) => o.id);
+    if (orderIds.length > 0) {
+      const itemsFilter = encodeURIComponent(orderIds.map((id: string) => `_orderId|eq|${id}`).join(';'));
+      const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${itemsFilter}&page=1&perPage=500`;
+
       try {
         const itemsResponse = await fetch(itemsUrl, {
           headers: {
@@ -132,38 +149,38 @@ Deno.serve(async (req: Request) => {
 
         if (itemsResponse.ok) {
           const itemsJson = await itemsResponse.json();
-          const items = itemsJson.data || [];
+          const items = itemsJson.data || [];          const itemsToInsert = items.map((item: any) => ({
+            id: item.id,
+            order_id: item._orderId,
+            product_id: item._productId || null,
+            name: item.name,
+            quantity: item.quantity,
+            kitchen_status: item.kitchenStatus || 'new',
+            note: item.note || '',
+            shown: false,
+            last_updated: new Date().toISOString(),
+          }));
 
-          for (const item of items) {
-            await supabase.from('order_items').upsert({
-              id: item.id,
-              order_id: order.id,
-              product_id: item._productId || null,
-              name: item.name,
-              quantity: item.quantity,
-              kitchen_status: item.kitchenStatus || 'new',
-              note: item.note || '',
-              shown: false,
-              last_updated: new Date().toISOString(),
-            }, { onConflict: 'id' });
+          if (itemsToInsert.length > 0) {
+            await supabase.from('order_items').upsert(itemsToInsert, { onConflict: 'id' });
+            processedItems = itemsToInsert.length;
+          }
 
-            processedItems++;
-
-            if (item.orderItemCustomizations?.length > 0) {
-              await supabase.from('order_item_subitems').delete().eq('order_item_id', item.id);
-              const subitems = item.orderItemCustomizations.map((c: any) => ({
-                order_item_id: item.id,
-                name: c.name,
-                quantity: c.quantity,
-              }));
-              if (subitems.length > 0) {
-                await supabase.from('order_item_subitems').insert(subitems);
-              }
+          const itemsWithCustomizations = items.filter((item: any) => item.orderItemCustomizations?.length > 0);
+          for (const item of itemsWithCustomizations) {
+            await supabase.from('order_item_subitems').delete().eq('order_item_id', item.id);
+            const subitems = item.orderItemCustomizations.map((c: any) => ({
+              order_item_id: item.id,
+              name: c.name,
+              quantity: c.quantity,
+            }));
+            if (subitems.length > 0) {
+              await supabase.from('order_item_subitems').insert(subitems);
             }
           }
         }
       } catch (e) {
-        console.log('Failed to fetch items for order:', order.id, e);
+        console.log('Failed to fetch items:', e);
       }
     }
 
