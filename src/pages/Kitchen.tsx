@@ -9,41 +9,60 @@ export default function Kitchen() {
   const [completedOrders, setCompletedOrders] = useState<Record<string, OrderWithItems>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [countdown, setCountdown] = useState(60)
-  const [previousOrderIds, setPreviousOrderIds] = useState<Set<string>>(new Set())
+  const [previousOrderIds, setPreviousOrderIds] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('previousOrderIds')
+    return stored ? new Set(JSON.parse(stored)) : new Set()
+  })
+  const [audioEnabled, setAudioEnabled] = useState(false)
 
   const playNotificationSound = () => {
+    if (!audioEnabled) {
+      console.log('Audio not enabled yet. Click anywhere to enable sound.')
+      return
+    }
+
+    try {
+      const audioContext = new AudioContext()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      oscillator.frequency.value = 800
+      oscillator.type = 'sine'
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.3)
+
+      setTimeout(() => {
+        const oscillator2 = audioContext.createOscillator()
+        const gainNode2 = audioContext.createGain()
+
+        oscillator2.connect(gainNode2)
+        gainNode2.connect(audioContext.destination)
+
+        oscillator2.frequency.value = 1000
+        oscillator2.type = 'sine'
+
+        gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime)
+        gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+
+        oscillator2.start(audioContext.currentTime)
+        oscillator2.stop(audioContext.currentTime + 0.3)
+      }, 200)
+    } catch (error) {
+      console.error('Error playing sound:', error)
+    }
+  }
+
+  const enableAudio = () => {
+    setAudioEnabled(true)
     const audioContext = new AudioContext()
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
-
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
-
-    oscillator.frequency.value = 800
-    oscillator.type = 'sine'
-
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
-
-    oscillator.start(audioContext.currentTime)
-    oscillator.stop(audioContext.currentTime + 0.3)
-
-    setTimeout(() => {
-      const oscillator2 = audioContext.createOscillator()
-      const gainNode2 = audioContext.createGain()
-
-      oscillator2.connect(gainNode2)
-      gainNode2.connect(audioContext.destination)
-
-      oscillator2.frequency.value = 1000
-      oscillator2.type = 'sine'
-
-      gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime)
-      gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
-
-      oscillator2.start(audioContext.currentTime)
-      oscillator2.stop(audioContext.currentTime + 0.3)
-    }, 200)
+    audioContext.resume()
   }
 
   const syncWithAPI = async () => {
@@ -63,7 +82,7 @@ export default function Kitchen() {
     }
   }
 
-  const loadOrders = async () => {
+  const loadOrders = async (isInitialLoad: boolean = false) => {
     try {
       await autoRemoveExcludedFromKitchen()
       const [active, completed] = await Promise.all([
@@ -73,14 +92,16 @@ export default function Kitchen() {
 
       const currentOrderIds = new Set(Object.keys(active))
 
-      if (previousOrderIds.size > 0) {
+      if (!isInitialLoad && previousOrderIds.size > 0) {
         const newOrderIds = [...currentOrderIds].filter(id => !previousOrderIds.has(id))
         if (newOrderIds.length > 0) {
+          console.log('New orders detected:', newOrderIds)
           playNotificationSound()
         }
       }
 
       setPreviousOrderIds(currentOrderIds)
+      localStorage.setItem('previousOrderIds', JSON.stringify([...currentOrderIds]))
       setActiveOrders(active)
       setCompletedOrders(completed)
       setIsLoading(false)
@@ -90,15 +111,15 @@ export default function Kitchen() {
   }
 
   useEffect(() => {
-    const syncAndLoad = async () => {
+    const syncAndLoad = async (isFirst: boolean = false) => {
       await syncWithAPI()
-      await loadOrders()
+      await loadOrders(isFirst)
     }
 
-    syncAndLoad()
+    syncAndLoad(true)
 
     const syncInterval = setInterval(() => {
-      syncAndLoad()
+      syncAndLoad(false)
       setCountdown(60)
     }, 60000)
 
@@ -319,13 +340,76 @@ export default function Kitchen() {
   }
 
   return (
-    <div style={styles.container}>
+    <div style={styles.container} onClick={!audioEnabled ? enableAudio : undefined}>
+      {!audioEnabled && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          cursor: 'pointer'
+        }}>
+          <div style={{
+            background: '#fff',
+            padding: '32px',
+            borderRadius: '12px',
+            textAlign: 'center',
+            maxWidth: '400px'
+          }}>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '24px', color: '#0f172a' }}>
+              Povolit zvukové upozornění
+            </h2>
+            <p style={{ margin: '0 0 24px 0', color: '#64748b', fontSize: '16px' }}>
+              Klikněte kamkoliv pro povolení zvukových upozornění na nové objednávky
+            </p>
+            <button style={{
+              padding: '12px 24px',
+              background: '#10b981',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}>
+              Povolit zvuk
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={styles.autoRefreshInfo}>
         <span style={{
           ...styles.statusIndicator,
-          background: '#10b981'
+          background: audioEnabled ? '#10b981' : '#f59e0b'
         }} />
-        <span>Synchronizace za {countdown}s</span>
+        <span>{audioEnabled ? 'Zvuk: Povolen' : 'Zvuk: Zakázán'} | Synchronizace za {countdown}s</span>
+        {audioEnabled && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              playNotificationSound()
+            }}
+            style={{
+              padding: '4px 12px',
+              background: '#0f172a',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              marginLeft: '12px'
+            }}
+          >
+            Test zvuku
+          </button>
+        )}
       </div>
 
       <TopMenu items={menuItems} />
