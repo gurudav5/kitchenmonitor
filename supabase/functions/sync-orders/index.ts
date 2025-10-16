@@ -52,6 +52,8 @@ Deno.serve(async (req) => {
     })
 
     if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text()
+      console.error('Token response error:', tokenResponse.status, errorText)
       throw new Error(`Failed to get access token: ${tokenResponse.status}`)
     }
 
@@ -62,69 +64,114 @@ Deno.serve(async (req) => {
       throw new Error('No access token received')
     }
 
-    const todayMidnight = new Date()
-    todayMidnight.setHours(0, 0, 0, 0)
-    const todayMidnightISO = todayMidnight.toISOString()
+    console.log('Access token obtained successfully')
 
-    const tomorrow3am = new Date()
-    tomorrow3am.setDate(tomorrow3am.getDate() + 1)
-    tomorrow3am.setHours(3, 0, 0, 0)
-    const tomorrow3amISO = tomorrow3am.toISOString()
+    const sevenDaysAgo = new Date()
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    const sevenDaysAgoISO = sevenDaysAgo.toISOString()
+
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const tomorrowISO = tomorrow.toISOString()
 
     const filter = encodeURIComponent(
-      `created|gteq|${todayMidnightISO};created|lt|${tomorrow3amISO}`
+      `created|gteq|${sevenDaysAgoISO};created|lt|${tomorrowISO}`
     )
 
-    console.log('Fetching orders...')
+    console.log('Fetching orders with filter:', filter)
     const allOrders = await fetchAllOrders(cloudId, accessToken, filter)
     console.log(`Fetched ${allOrders.length} orders`)
 
+    if (allOrders.length === 0) {
+      console.log('No orders found, returning success with 0 orders')
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'No orders found in the specified time range',
+          ordersProcessed: 0,
+          itemsProcessed: 0,
+        }),
+        {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    }
+
     let processedOrders = 0
     let processedItems = 0
+    let errorCount = 0
 
     for (const order of allOrders) {
-      const tableName = await getTableName(cloudId, accessToken, order._tableId)
+      try {
+        const tableName = await getTableName(cloudId, accessToken, order._tableId)
 
-      const rawNote = order.note || ''
-      const lowerNote = rawNote.toLowerCase()
-      let deliveryService = ''
-      if (lowerNote.includes('foodora')) {
-        deliveryService = 'foodora'
-      } else if (lowerNote.includes('wolt')) {
-        deliveryService = 'wolt'
-      } else if (lowerNote.includes('bolt')) {
-        deliveryService = 'bolt'
-      }
+        const rawNote = order.note || ''
+        const lowerNote = rawNote.toLowerCase()
+        let deliveryService = ''
+        if (lowerNote.includes('foodora')) {
+          deliveryService = 'foodora'
+        } else if (lowerNote.includes('wolt')) {
+          deliveryService = 'wolt'
+        } else if (lowerNote.includes('bolt')) {
+          deliveryService = 'bolt'
+        }
 
-      await saveOrder(supabase, order, tableName, deliveryService, rawNote)
-      processedOrders++
+        await saveOrder(supabase, order, tableName, deliveryService, rawNote)
+        processedOrders++
 
-      const orderItems = await fetchAllOrderItems(cloudId, accessToken, order.id)
+        const orderItems = await fetchAllOrderItems(cloudId, accessToken, order.id)
+        
+        if (orderItems.length === 0) {
+          console.log(`No items found for order ${order.id}`)
+          continue
+        }
 
-      for (const item of orderItems) {
-        await saveOrderItem(supabase, item, order.id)
-        processedItems++
+        for (const item of orderItems) {
+          try {
+            await saveOrderItem(supabase, item, order.id)
+            processedItems++
 
-        if (item.orderItemCustomizations && item.orderItemCustomizations.length > 0) {
-          await supabase
-            .from('order_item_subitems')
-            .delete()
-            .eq('order_item_id', item.id)
+            if (item.orderItemCustomizations && item.orderItemCustomizations.length > 0) {
+              const { error: deleteError } = await supabase
+                .from('order_item_subitems')
+                .delete()
+                .eq('order_item_id', item.id)
 
-          const subitems = item.orderItemCustomizations.map((cust) => ({
-            order_item_id: item.id,
-            name: cust.name,
-            quantity: cust.quantity,
-          }))
+              if (deleteError) {
+                console.error('Error deleting subitems:', deleteError)
+              }
 
-          if (subitems.length > 0) {
-            await supabase.from('order_item_subitems').insert(subitems)
+              const subitems = item.orderItemCustomizations.map((cust) => ({
+                order_item_id: item.id,
+                name: cust.name,
+                quantity: cust.quantity,
+              }))
+
+              if (subitems.length > 0) {
+                const { error: insertError } = await supabase
+                  .from('order_item_subitems')
+                  .insert(subitems)
+
+                if (insertError) {
+                  console.error('Error inserting subitems:', insertError)
+                }
+              }
+            }
+          } catch (itemError) {
+            console.error(`Error processing item ${item.id}:`, itemError)
+            errorCount++
           }
         }
+      } catch (orderError) {
+        console.error(`Error processing order ${order.id}:`, orderError)
+        errorCount++
       }
     }
 
-    console.log(`Processed ${processedOrders} orders, ${processedItems} items`)
+    console.log(`Processed ${processedOrders} orders, ${processedItems} items, ${errorCount} errors`)
 
     return new Response(
       JSON.stringify({
@@ -132,6 +179,7 @@ Deno.serve(async (req) => {
         message: 'Orders synchronized successfully',
         ordersProcessed: processedOrders,
         itemsProcessed: processedItems,
+        errors: errorCount,
       }),
       {
         headers: {
@@ -141,11 +189,12 @@ Deno.serve(async (req) => {
       }
     )
   } catch (error) {
-    console.error('Error syncing orders:', error)
+    console.error('Fatal error syncing orders:', error)
     return new Response(
       JSON.stringify({
         success: false,
         error: error.message,
+        stack: error.stack,
       }),
       {
         status: 500,
@@ -167,31 +216,40 @@ async function fetchAllOrders(
   let page = 1
   const perPage = 100
 
-  while (true) {
-    const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?filter=${filter}&page=${page}&perPage=${perPage}`
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json; charset=UTF-8',
-      },
-    })
+  try {
+    while (page <= 10) {
+      const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/orders?filter=${filter}&page=${page}&perPage=${perPage}`
+      console.log(`Fetching orders page ${page}...`)
+      
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json; charset=UTF-8',
+        },
+      })
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch orders: ${response.status}`)
+      if (!response.ok) {
+        console.error(`Failed to fetch orders page ${page}: ${response.status}`)
+        break
+      }
+
+      const json = await response.json()
+      if (!json.data || !Array.isArray(json.data) || json.data.length === 0) {
+        console.log(`No more orders on page ${page}`)
+        break
+      }
+
+      console.log(`Found ${json.data.length} orders on page ${page}`)
+      allOrders.push(...json.data)
+
+      if (!json.nextPage) {
+        break
+      }
+
+      page = json.nextPage
     }
-
-    const json = await response.json()
-    if (!json.data || !Array.isArray(json.data) || json.data.length === 0) {
-      break
-    }
-
-    allOrders.push(...json.data)
-
-    if (!json.nextPage) {
-      break
-    }
-
-    page = json.nextPage
+  } catch (error) {
+    console.error('Error fetching orders:', error)
   }
 
   return allOrders
@@ -207,31 +265,41 @@ async function fetchAllOrderItems(
   const perPage = 100
   const filter = encodeURIComponent(`_orderId|eq|${orderId}`)
 
-  while (true) {
-    const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${filter}&page=${page}&perPage=${perPage}`
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json; charset=UTF-8',
-      },
-    })
+  try {
+    while (page <= 10) {
+      const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${filter}&page=${page}&perPage=${perPage}`
+      
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json; charset=UTF-8',
+        },
+      })
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch order items: ${response.status}`)
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`No items found for order ${orderId} (404)`)
+          break
+        }
+        console.error(`Failed to fetch items for order ${orderId}: ${response.status}`)
+        break
+      }
+
+      const json = await response.json()
+      if (!json.data || !Array.isArray(json.data) || json.data.length === 0) {
+        break
+      }
+
+      allItems.push(...json.data)
+
+      if (!json.nextPage) {
+        break
+      }
+
+      page = json.nextPage
     }
-
-    const json = await response.json()
-    if (!json.data || !Array.isArray(json.data) || json.data.length === 0) {
-      break
-    }
-
-    allItems.push(...json.data)
-
-    if (!json.nextPage) {
-      break
-    }
-
-    page = json.nextPage
+  } catch (error) {
+    console.error(`Error fetching items for order ${orderId}:`, error)
   }
 
   return allItems
@@ -256,12 +324,14 @@ async function getTableName(
     })
 
     if (!response.ok) {
+      console.log(`Failed to fetch table ${tableId}: ${response.status}`)
       return ''
     }
 
     const tableData = await response.json()
     return tableData.name || ''
-  } catch {
+  } catch (error) {
+    console.error(`Error fetching table ${tableId}:`, error)
     return ''
   }
 }
