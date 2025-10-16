@@ -20,7 +20,25 @@ export async function getActiveOrders(): Promise<Record<string, OrderWithItems>>
     !item.product_id || !excludedIds.has(item.product_id)
   ) || []
 
-  return groupItemsByOrder(filteredItems)
+  const orders = groupItemsByOrder(filteredItems)
+
+  const orderIds = Object.keys(orders)
+  if (orderIds.length > 0) {
+    const { data: timings } = await supabase
+      .from('order_timing')
+      .select('*')
+      .in('order_id', orderIds)
+
+    if (timings) {
+      for (const timing of timings) {
+        if (orders[timing.order_id]) {
+          orders[timing.order_id].timing = timing
+        }
+      }
+    }
+  }
+
+  return orders
 }
 
 export async function getCompletedOrders(): Promise<Record<string, OrderWithItems>> {
@@ -109,7 +127,10 @@ export async function updateItemStatus(
 ): Promise<void> {
   const { error } = await supabase
     .from('order_items')
-    .update({ kitchen_status: newStatus })
+    .update({
+      kitchen_status: newStatus,
+      last_updated: new Date().toISOString()
+    })
     .in('id', itemIds)
 
   if (error) throw error
@@ -195,5 +216,81 @@ export async function syncProducts(): Promise<{ success: boolean; error?: string
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     }
+  }
+}
+
+export async function startOrderPreparation(orderId: string): Promise<void> {
+  const now = new Date().toISOString()
+
+  const { data: existing } = await supabase
+    .from('order_timing')
+    .select('*')
+    .eq('order_id', orderId)
+    .maybeSingle()
+
+  if (existing) {
+    if (!existing.first_item_started) {
+      const waitingTime = Math.floor((new Date(now).getTime() - new Date(existing.created_at).getTime()) / 1000)
+
+      const { error } = await supabase
+        .from('order_timing')
+        .update({
+          first_item_started: now,
+          waiting_time: waitingTime
+        })
+        .eq('order_id', orderId)
+
+      if (error) throw error
+    }
+  } else {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single()
+
+    if (order) {
+      const waitingTime = Math.floor((new Date(now).getTime() - new Date(order.created).getTime()) / 1000)
+
+      const { error } = await supabase
+        .from('order_timing')
+        .insert({
+          order_id: orderId,
+          table_name: order.table_name || '',
+          delivery_service: order.delivery_service || '',
+          created_at: order.created,
+          first_item_started: now,
+          waiting_time: waitingTime,
+          status: 'active'
+        })
+
+      if (error) throw error
+    }
+  }
+}
+
+export async function completeOrder(orderId: string): Promise<void> {
+  const now = new Date().toISOString()
+
+  const { data: timing } = await supabase
+    .from('order_timing')
+    .select('*')
+    .eq('order_id', orderId)
+    .maybeSingle()
+
+  if (timing && timing.first_item_started) {
+    const preparationTime = Math.floor((new Date(now).getTime() - new Date(timing.first_item_started).getTime()) / 1000)
+    const totalTime = Math.floor((new Date(now).getTime() - new Date(timing.created_at).getTime()) / 1000)
+
+    const { error } = await supabase
+      .from('order_timing')
+      .update({
+        all_items_completed: now,
+        preparation_time: preparationTime,
+        total_time: totalTime
+      })
+      .eq('order_id', orderId)
+
+    if (error) throw error
   }
 }

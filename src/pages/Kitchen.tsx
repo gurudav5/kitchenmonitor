@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import TopMenu from '../components/TopMenu'
-import { getActiveOrders, getCompletedOrders, updateItemStatus, passOrder, autoRemoveExcludedFromKitchen } from '../services/api'
+import { getActiveOrders, getCompletedOrders, updateItemStatus, passOrder, autoRemoveExcludedFromKitchen, startOrderPreparation, completeOrder } from '../services/api'
 import type { OrderWithItems } from '../types'
 import { format } from 'date-fns'
 
@@ -62,7 +62,10 @@ export default function Kitchen() {
 
     const itemIds = order.items.map(item => item.id)
     try {
-      await updateItemStatus(itemIds, 'in-progress')
+      await Promise.all([
+        updateItemStatus(itemIds, 'in-progress'),
+        startOrderPreparation(orderId)
+      ])
       pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     } catch (error) {
@@ -86,7 +89,10 @@ export default function Kitchen() {
 
     const itemIds = order.items.map(item => item.id)
     try {
-      await updateItemStatus(itemIds, 'completed')
+      await Promise.all([
+        updateItemStatus(itemIds, 'completed'),
+        completeOrder(orderId)
+      ])
       setTimeout(async () => {
         await passOrder(orderId)
         pendingUpdatesRef.current.delete(orderId)
@@ -144,9 +150,32 @@ export default function Kitchen() {
     )
   }
 
+  const calculateTime = (order: OrderWithItems) => {
+    const now = Date.now()
+    const createdTime = new Date(order.created).getTime()
+    const totalMinutes = Math.floor((now - createdTime) / 60000)
+
+    if (order.timing?.first_item_started) {
+      const startedTime = new Date(order.timing.first_item_started).getTime()
+      const preparationMinutes = Math.floor((now - startedTime) / 60000)
+      return {
+        total: totalMinutes,
+        waiting: order.timing.waiting_time ? Math.floor(order.timing.waiting_time / 60) : null,
+        preparation: preparationMinutes
+      }
+    }
+
+    return {
+      total: totalMinutes,
+      waiting: null,
+      preparation: null
+    }
+  }
+
   const renderOrder = (order: OrderWithItems, isCompleted: boolean = false) => {
     const allCompleted = order.items.every(item => item.kitchen_status === 'completed')
     const allInProgress = order.items.every(item => item.kitchen_status === 'in-progress')
+    const timeInfo = calculateTime(order)
 
     const unifiedItems: Record<string, any> = {}
     order.items.forEach(item => {
@@ -172,6 +201,24 @@ export default function Kitchen() {
         </div>
 
         <div style={styles.orderBody}>
+          <div style={styles.timeInfo}>
+            <div style={styles.timeBlock}>
+              <span style={styles.timeLabel}>Celkem:</span>
+              <span style={{
+                ...styles.timeValue,
+                color: timeInfo.total > 15 ? '#dc2626' : timeInfo.total > 10 ? '#f59e0b' : '#10b981'
+              }}>
+                {timeInfo.total} min
+              </span>
+            </div>
+            {timeInfo.preparation !== null && (
+              <div style={styles.timeBlock}>
+                <span style={styles.timeLabel}>Příprava:</span>
+                <span style={styles.timeValue}>{timeInfo.preparation} min</span>
+              </div>
+            )}
+          </div>
+
           <div style={styles.orderMeta}>
             {order.table_name && (
               <span style={styles.tableInfo}>Stůl: {order.table_name}</span>
@@ -348,6 +395,30 @@ const styles = {
     opacity: 0.8
   },
   orderBody: { padding: '16px' },
+  timeInfo: {
+    display: 'flex',
+    gap: '12px',
+    marginBottom: '12px',
+    padding: '8px 12px',
+    background: '#f8fafc',
+    borderRadius: '6px',
+    border: '1px solid #e2e8f0'
+  },
+  timeBlock: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px'
+  },
+  timeLabel: {
+    fontSize: '12px',
+    color: '#64748b',
+    fontWeight: '500'
+  },
+  timeValue: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#0f172a'
+  },
   orderMeta: {
     display: 'flex',
     justifyContent: 'space-between',

@@ -30,6 +30,7 @@ export interface OrderItemSubitem {
 export interface OrderWithItems extends Order {
   items: OrderItem[]
   subitems?: Record<string, OrderItemSubitem[]>
+  timing?: OrderTiming
 }
 
 export interface ExcludedProduct {
