@@ -175,18 +175,13 @@ Deno.serve(async (req: Request) => {
           const itemsToInsert = filteredItems.map((item: any) => {
             const preservedStatus = existingStatusMap.get(item.id);
 
-            let defaultStatus = 'new';
-            if (!preservedStatus && item.completed) {
-              defaultStatus = 'completed';
-            }
-
             return {
               id: item.id,
               order_id: item._orderId,
               product_id: item._productId || null,
               name: item.name,
               quantity: item.quantity,
-              kitchen_status: preservedStatus || defaultStatus,
+              kitchen_status: preservedStatus || 'new',
               note: item.note || '',
               shown: false,
               last_updated: new Date().toISOString(),
