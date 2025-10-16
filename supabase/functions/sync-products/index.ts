@@ -49,8 +49,9 @@ Deno.serve(async (req: Request) => {
 
     let page = 1;
     const allProducts: any[] = [];
+    let hasMore = true;
 
-    while (page <= 20) {
+    while (hasMore && page <= 100) {
       const url = `https://api.dotykacka.cz/v2/clouds/${cloudId}/products?page=${page}&perPage=100`;
       const response = await fetch(url, {
         headers: {
@@ -63,8 +64,12 @@ Deno.serve(async (req: Request) => {
       const json = await response.json();
       if (!json.data || json.data.length === 0) break;
       allProducts.push(...json.data);
-      if (!json.nextPage) break;
-      page = json.nextPage;
+
+      if (json.nextPage) {
+        page = parseInt(json.nextPage, 10);
+      } else {
+        hasMore = false;
+      }
     }
 
     for (const product of allProducts) {

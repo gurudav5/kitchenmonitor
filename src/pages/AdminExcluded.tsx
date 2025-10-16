@@ -8,6 +8,7 @@ export default function AdminExcluded() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const menuItems = [
     { path: '/', label: 'Dashboard' },
@@ -71,6 +72,10 @@ export default function AdminExcluded() {
     }
   }
 
+  const filteredProducts = products.filter(product =>
+    product.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   return (
     <div style={{ padding: '16px' }}>
       <TopMenu items={menuItems} />
@@ -97,7 +102,7 @@ export default function AdminExcluded() {
         </div>
       )}
 
-      <div style={{ marginBottom: '16px' }}>
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' }}>
         <button
           onClick={handleSyncProducts}
           disabled={isSyncing}
@@ -115,6 +120,11 @@ export default function AdminExcluded() {
         >
           {isSyncing ? 'Synchronizuji...' : '🔄 Načíst produkty z Dotykačky'}
         </button>
+        {products.length > 0 && (
+          <span style={{ fontSize: '14px', color: '#64748b' }}>
+            Celkem: {products.length} produktů
+          </span>
+        )}
       </div>
 
       {isLoading ? (
@@ -145,6 +155,27 @@ export default function AdminExcluded() {
             border: '1px solid #e2e8f0',
             marginBottom: '16px'
           }}>
+            <div style={{ marginBottom: '16px' }}>
+              <input
+                type="text"
+                placeholder="Vyhledat produkt..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 16px',
+                  fontSize: '14px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  outline: 'none'
+                }}
+              />
+              {searchQuery && (
+                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#64748b' }}>
+                  Zobrazeno: {filteredProducts.length} z {products.length} produktů
+                </p>
+              )}
+            </div>
             <p style={{ margin: '0 0 12px 0', color: '#64748b', fontSize: '14px' }}>
               Vyberte produkty, které se nemají zobrazovat v kuchyni:
             </p>
@@ -155,7 +186,7 @@ export default function AdminExcluded() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
               gap: '8px'
             }}>
-              {products.map(product => (
+              {filteredProducts.map(product => (
                 <label
                   key={product.id}
                   style={{
