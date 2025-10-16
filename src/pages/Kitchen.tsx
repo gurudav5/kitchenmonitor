@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TopMenu from '../components/TopMenu'
 import { getActiveOrders, getCompletedOrders, updateItemStatus, passOrder, autoRemoveExcludedFromKitchen, startOrderPreparation, completeOrder } from '../services/api'
 import type { OrderWithItems } from '../types'
@@ -9,19 +9,28 @@ export default function Kitchen() {
   const [completedOrders, setCompletedOrders] = useState<Record<string, OrderWithItems>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [countdown, setCountdown] = useState(60)
-  const [previousOrderIds, setPreviousOrderIds] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem('previousOrderIds')
-    return stored ? new Set(JSON.parse(stored)) : new Set()
+  const previousOrderIdsRef = useRef<Set<string>>(new Set())
+  const isFirstLoadRef = useRef(true)
+  const [audioEnabled, setAudioEnabled] = useState(() => {
+    return localStorage.getItem('kitchenAudioEnabled') === 'true'
   })
-  const [audioEnabled, setAudioEnabled] = useState(false)
+  const audioEnabledRef = useRef(audioEnabled)
+
+  useEffect(() => {
+    audioEnabledRef.current = audioEnabled
+  }, [audioEnabled])
 
   const playNotificationSound = () => {
-    if (!audioEnabled) {
+    const enabled = audioEnabledRef.current
+    console.log('playNotificationSound called, audioEnabled:', enabled)
+
+    if (!enabled) {
       console.log('Audio not enabled yet. Click anywhere to enable sound.')
       return
     }
 
     try {
+      console.log('Playing notification sound...')
       const audioContext = new AudioContext()
       const oscillator = audioContext.createOscillator()
       const gainNode = audioContext.createGain()
@@ -60,9 +69,16 @@ export default function Kitchen() {
   }
 
   const enableAudio = () => {
+    console.log('Enabling audio...')
     setAudioEnabled(true)
-    const audioContext = new AudioContext()
-    audioContext.resume()
+    localStorage.setItem('kitchenAudioEnabled', 'true')
+    try {
+      const audioContext = new AudioContext()
+      audioContext.resume()
+      playNotificationSound()
+    } catch (error) {
+      console.error('Error enabling audio:', error)
+    }
   }
 
   const syncWithAPI = async () => {
@@ -82,7 +98,7 @@ export default function Kitchen() {
     }
   }
 
-  const loadOrders = async (isInitialLoad: boolean = false) => {
+  const loadOrders = async () => {
     try {
       await autoRemoveExcludedFromKitchen()
       const [active, completed] = await Promise.all([
@@ -91,17 +107,27 @@ export default function Kitchen() {
       ])
 
       const currentOrderIds = new Set(Object.keys(active))
+      const previousOrderIds = previousOrderIdsRef.current
+      const isFirstLoad = isFirstLoadRef.current
 
-      if (!isInitialLoad && previousOrderIds.size > 0) {
+      console.log('Current order IDs:', [...currentOrderIds])
+      console.log('Previous order IDs:', [...previousOrderIds])
+      console.log('Is first load:', isFirstLoad)
+
+      if (!isFirstLoad && previousOrderIds.size > 0) {
         const newOrderIds = [...currentOrderIds].filter(id => !previousOrderIds.has(id))
+        console.log('New order IDs:', newOrderIds)
         if (newOrderIds.length > 0) {
-          console.log('New orders detected:', newOrderIds)
+          console.log('Playing sound for new orders:', newOrderIds)
           playNotificationSound()
         }
       }
 
-      setPreviousOrderIds(currentOrderIds)
-      localStorage.setItem('previousOrderIds', JSON.stringify([...currentOrderIds]))
+      if (isFirstLoad) {
+        isFirstLoadRef.current = false
+      }
+
+      previousOrderIdsRef.current = currentOrderIds
       setActiveOrders(active)
       setCompletedOrders(completed)
       setIsLoading(false)
@@ -111,15 +137,15 @@ export default function Kitchen() {
   }
 
   useEffect(() => {
-    const syncAndLoad = async (isFirst: boolean = false) => {
+    const syncAndLoad = async () => {
       await syncWithAPI()
-      await loadOrders(isFirst)
+      await loadOrders()
     }
 
-    syncAndLoad(true)
+    syncAndLoad()
 
     const syncInterval = setInterval(() => {
-      syncAndLoad(false)
+      syncAndLoad()
       setCountdown(60)
     }, 60000)
 
