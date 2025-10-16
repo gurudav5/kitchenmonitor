@@ -136,20 +136,23 @@ Deno.serve(async (req: Request) => {
 
     const orderIds = orders.map((o: any) => o.id);
     if (orderIds.length > 0) {
-      const itemsFilter = encodeURIComponent(orderIds.map((id: string) => `_orderId|eq|${id}`).join(';'));
-      const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?filter=${itemsFilter}&page=1&perPage=500`;
+      const itemsUrl = `https://api.dotykacka.cz/v2/clouds/${cloudId}/order-items?page=1&perPage=500&sort=-created`;
 
       try {
         const itemsResponse = await fetch(itemsUrl, {
+          signal: AbortSignal.timeout(30000),
           headers: {
             Authorization: `Bearer ${accessToken}`,
             Accept: 'application/json; charset=UTF-8',
           },
         });
 
+        console.log('Items response status:', itemsResponse.status);
+
         if (itemsResponse.ok) {
           const itemsJson = await itemsResponse.json();
           const items = itemsJson.data || [];
+          console.log('Fetched items count:', items.length);
 
           const itemIds = items.map((item: any) => item.id);
           const { data: existingItems } = await supabase
@@ -166,8 +169,16 @@ Deno.serve(async (req: Request) => {
             });
           }
 
-          const itemsToInsert = items.map((item: any) => {
+          const orderIdsSet = new Set(orderIds);
+          const filteredItems = items.filter((item: any) => orderIdsSet.has(item._orderId));
+
+          const itemsToInsert = filteredItems.map((item: any) => {
             const preservedStatus = existingStatusMap.get(item.id);
+
+            let defaultStatus = 'new';
+            if (!preservedStatus && item.completed) {
+              defaultStatus = 'completed';
+            }
 
             return {
               id: item.id,
@@ -175,7 +186,7 @@ Deno.serve(async (req: Request) => {
               product_id: item._productId || null,
               name: item.name,
               quantity: item.quantity,
-              kitchen_status: preservedStatus || item.kitchenStatus || 'new',
+              kitchen_status: preservedStatus || defaultStatus,
               note: item.note || '',
               shown: false,
               last_updated: new Date().toISOString(),
@@ -187,7 +198,7 @@ Deno.serve(async (req: Request) => {
             processedItems = itemsToInsert.length;
           }
 
-          const itemsWithCustomizations = items.filter((item: any) => item.orderItemCustomizations?.length > 0);
+          const itemsWithCustomizations = filteredItems.filter((item: any) => item.orderItemCustomizations?.length > 0);
           for (const item of itemsWithCustomizations) {
             await supabase.from('order_item_subitems').delete().eq('order_item_id', item.id);
             const subitems = item.orderItemCustomizations.map((c: any) => ({
@@ -199,6 +210,8 @@ Deno.serve(async (req: Request) => {
               await supabase.from('order_item_subitems').insert(subitems);
             }
           }
+        } else {
+          console.log('Items response not OK, status:', itemsResponse.status, await itemsResponse.text());
         }
       } catch (e) {
         console.log('Failed to fetch items:', e);
