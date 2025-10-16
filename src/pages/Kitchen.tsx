@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TopMenu from '../components/TopMenu'
 import { getActiveOrders, getCompletedOrders, updateItemStatus, passOrder, autoRemoveExcludedFromKitchen } from '../services/api'
 import type { OrderWithItems } from '../types'
@@ -9,10 +9,10 @@ export default function Kitchen() {
   const [completedOrders, setCompletedOrders] = useState<Record<string, OrderWithItems>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [countdown, setCountdown] = useState(10)
-  const [pendingUpdates, setPendingUpdates] = useState<Set<string>>(new Set())
+  const pendingUpdatesRef = useRef<Set<string>>(new Set())
 
   const loadOrders = async (skipIfPending: boolean = false) => {
-    if (skipIfPending && pendingUpdates.size > 0) {
+    if (skipIfPending && pendingUpdatesRef.current.size > 0) {
       return
     }
 
@@ -52,7 +52,7 @@ export default function Kitchen() {
     const order = activeOrders[orderId]
     if (!order) return
 
-    setPendingUpdates(prev => new Set(prev).add(orderId))
+    pendingUpdatesRef.current.add(orderId)
 
     const updatedOrder: OrderWithItems = {
       ...order,
@@ -63,19 +63,11 @@ export default function Kitchen() {
     const itemIds = order.items.map(item => item.id)
     try {
       await updateItemStatus(itemIds, 'in-progress')
-      setPendingUpdates(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(orderId)
-        return newSet
-      })
+      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     } catch (error) {
       console.error('Error preparing order:', error)
-      setPendingUpdates(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(orderId)
-        return newSet
-      })
+      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     }
   }
@@ -84,7 +76,7 @@ export default function Kitchen() {
     const order = activeOrders[orderId]
     if (!order) return
 
-    setPendingUpdates(prev => new Set(prev).add(orderId))
+    pendingUpdatesRef.current.add(orderId)
 
     const updatedOrder: OrderWithItems = {
       ...order,
@@ -97,20 +89,12 @@ export default function Kitchen() {
       await updateItemStatus(itemIds, 'completed')
       setTimeout(async () => {
         await passOrder(orderId)
-        setPendingUpdates(prev => {
-          const newSet = new Set(prev)
-          newSet.delete(orderId)
-          return newSet
-        })
+        pendingUpdatesRef.current.delete(orderId)
         await loadOrders()
       }, 5000)
     } catch (error) {
       console.error('Error completing order:', error)
-      setPendingUpdates(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(orderId)
-        return newSet
-      })
+      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     }
   }
@@ -119,7 +103,7 @@ export default function Kitchen() {
     const order = completedOrders[orderId]
     if (!order) return
 
-    setPendingUpdates(prev => new Set(prev).add(orderId))
+    pendingUpdatesRef.current.add(orderId)
 
     const updatedOrder: OrderWithItems = {
       ...order,
@@ -135,19 +119,11 @@ export default function Kitchen() {
     const itemIds = order.items.map(item => item.id)
     try {
       await updateItemStatus(itemIds, 'in-progress')
-      setPendingUpdates(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(orderId)
-        return newSet
-      })
+      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     } catch (error) {
       console.error('Error returning order:', error)
-      setPendingUpdates(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(orderId)
-        return newSet
-      })
+      pendingUpdatesRef.current.delete(orderId)
       await loadOrders()
     }
   }
