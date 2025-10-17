@@ -269,19 +269,31 @@ export default function Kitchen() {
 
         <div style={styles.orderBody}>
           <div style={styles.timeInfo}>
-            <div style={styles.timeBlock}>
-              <span style={styles.timeLabel}>Celkem:</span>
-              <span style={{
-                ...styles.timeValue,
-                color: timeInfo.total > 15 ? '#dc2626' : timeInfo.total > 10 ? '#f59e0b' : '#10b981'
-              }}>
-                {timeInfo.total} min
-              </span>
-            </div>
-            {timeInfo.preparation !== null && (
+            {timeInfo.preparation !== null ? (
+              <>
+                <div style={styles.timeBlock}>
+                  <span style={styles.timeLabel}>Příprava:</span>
+                  <span style={{
+                    ...styles.timeValue,
+                    color: timeInfo.preparation > 15 ? '#dc2626' : timeInfo.preparation > 10 ? '#f59e0b' : '#10b981'
+                  }}>
+                    {timeInfo.preparation} min
+                  </span>
+                </div>
+                <div style={styles.timeBlock}>
+                  <span style={styles.timeLabel}>Celkem:</span>
+                  <span style={styles.timeValue}>{timeInfo.total} min</span>
+                </div>
+              </>
+            ) : (
               <div style={styles.timeBlock}>
-                <span style={styles.timeLabel}>Příprava:</span>
-                <span style={styles.timeValue}>{timeInfo.preparation} min</span>
+                <span style={styles.timeLabel}>Čeká:</span>
+                <span style={{
+                  ...styles.timeValue,
+                  color: timeInfo.total > 5 ? '#f59e0b' : '#64748b'
+                }}>
+                  {timeInfo.total} min
+                </span>
               </div>
             )}
           </div>
