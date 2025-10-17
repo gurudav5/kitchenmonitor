@@ -18,6 +18,7 @@ export interface OrderItem {
   note: string
   shown: boolean
   last_updated: string
+  order_item_subitems?: OrderItemSubitem[]
 }
 
 export interface OrderItemSubitem {

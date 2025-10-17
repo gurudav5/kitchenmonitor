@@ -32,37 +32,30 @@ export default function Kitchen() {
     try {
       console.log('Playing notification sound...')
       const audioContext = new AudioContext()
-      const oscillator = audioContext.createOscillator()
-      const gainNode = audioContext.createGain()
 
-      oscillator.connect(gainNode)
-      gainNode.connect(audioContext.destination)
+      const playTone = (frequency: number, startTime: number, duration: number) => {
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
 
-      oscillator.frequency.value = 800
-      oscillator.type = 'sine'
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
 
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+        oscillator.frequency.value = frequency
+        oscillator.type = 'sine'
 
-      oscillator.start(audioContext.currentTime)
-      oscillator.stop(audioContext.currentTime + 0.3)
+        gainNode.gain.setValueAtTime(0.5, startTime)
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration)
 
-      setTimeout(() => {
-        const oscillator2 = audioContext.createOscillator()
-        const gainNode2 = audioContext.createGain()
+        oscillator.start(startTime)
+        oscillator.stop(startTime + duration)
+      }
 
-        oscillator2.connect(gainNode2)
-        gainNode2.connect(audioContext.destination)
+      const now = audioContext.currentTime
+      playTone(800, now, 0.4)
+      playTone(1000, now + 0.5, 0.4)
+      playTone(800, now + 1.0, 0.4)
+      playTone(1000, now + 1.5, 0.4)
 
-        oscillator2.frequency.value = 1000
-        oscillator2.type = 'sine'
-
-        gainNode2.gain.setValueAtTime(0.3, audioContext.currentTime)
-        gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
-
-        oscillator2.start(audioContext.currentTime)
-        oscillator2.stop(audioContext.currentTime + 0.3)
-      }, 200)
     } catch (error) {
       console.error('Error playing sound:', error)
     }
@@ -114,7 +107,7 @@ export default function Kitchen() {
       console.log('Previous order IDs:', [...previousOrderIds])
       console.log('Is first load:', isFirstLoad)
 
-      if (!isFirstLoad && previousOrderIds.size > 0) {
+      if (!isFirstLoad) {
         const newOrderIds = [...currentOrderIds].filter(id => !previousOrderIds.has(id))
         console.log('New order IDs:', newOrderIds)
         if (newOrderIds.length > 0) {
@@ -317,6 +310,15 @@ export default function Kitchen() {
                 </div>
                 {item.note && (
                   <div style={styles.itemNote}>{item.note}</div>
+                )}
+                {item.order_item_subitems && item.order_item_subitems.length > 0 && (
+                  <div style={styles.subitems}>
+                    {item.order_item_subitems.map((subitem: any, subIdx: number) => (
+                      <div key={subIdx} style={styles.subitem}>
+                        + {subitem.quantity}× {subitem.name}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             ))}
@@ -609,6 +611,17 @@ const styles = {
     fontSize: '12px',
     color: '#dc2626',
     fontWeight: '500',
+    marginTop: '4px'
+  },
+  subitems: {
+    marginTop: '8px',
+    marginLeft: '12px',
+    paddingLeft: '12px',
+    borderLeft: '2px solid #cbd5e1'
+  },
+  subitem: {
+    fontSize: '12px',
+    color: '#64748b',
     marginTop: '4px'
   },
   orderActions: {

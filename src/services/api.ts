@@ -6,7 +6,8 @@ export async function getActiveOrders(): Promise<Record<string, OrderWithItems>>
     .from('order_items')
     .select(`
       *,
-      orders (*)
+      orders (*),
+      order_item_subitems (*)
     `)
     .in('kitchen_status', ['new', 'in-progress', 'reordered'])
     .order('created', { foreignTable: 'orders', ascending: true })
@@ -48,7 +49,8 @@ export async function getCompletedOrders(): Promise<Record<string, OrderWithItem
     .from('order_items')
     .select(`
       *,
-      orders (*)
+      orders (*),
+      order_item_subitems (*)
     `)
     .eq('kitchen_status', 'completed')
     .gte('last_updated', thirtyMinutesAgo)
