@@ -287,12 +287,13 @@ export default function Kitchen() {
               </>
             ) : (
               <div style={styles.timeBlock}>
-                <span style={styles.timeLabel}>Čeká:</span>
                 <span style={{
                   ...styles.timeValue,
-                  color: timeInfo.total > 5 ? '#f59e0b' : '#64748b'
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  color: '#ef4444'
                 }}>
-                  {timeInfo.total} min
+                  🔔 NOVÁ OBJEDNÁVKA
                 </span>
               </div>
             )}

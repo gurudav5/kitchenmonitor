@@ -10,7 +10,7 @@ export async function getActiveOrders(): Promise<Record<string, OrderWithItems>>
       order_item_subitems (*)
     `)
     .in('kitchen_status', ['new', 'in-progress', 'reordered'])
-    .order('created', { foreignTable: 'orders', ascending: true })
+    .order('created', { foreignTable: 'orders', ascending: false })
 
   if (itemsError) throw itemsError
 
@@ -54,7 +54,7 @@ export async function getCompletedOrders(): Promise<Record<string, OrderWithItem
     `)
     .eq('kitchen_status', 'completed')
     .gte('last_updated', thirtyMinutesAgo)
-    .order('created', { foreignTable: 'orders', ascending: true })
+    .order('created', { foreignTable: 'orders', ascending: false })
 
   if (error) throw error
 
@@ -116,7 +116,8 @@ function groupItemsByOrder(items: any[]): Record<string, OrderWithItems> {
       kitchen_status: item.kitchen_status,
       note: item.note,
       shown: item.shown,
-      last_updated: item.last_updated
+      last_updated: item.last_updated,
+      order_item_subitems: item.order_item_subitems || []
     })
   }
 
